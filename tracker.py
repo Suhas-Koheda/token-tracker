@@ -20,6 +20,12 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
 # ── Config ──────────────────────────────────────────────────────────────
 PORT = int(os.environ.get("TOKEN_TRACKER_PORT", "8765"))
 OPENCODE_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
@@ -272,6 +278,53 @@ def _load_codex_sessions() -> list[dict]:
             except Exception:
                 continue
     return sessions
+
+
+# Patterns that indicate agent-spawned processes
+_AGENT_PROCESS_PATTERNS = [
+    "python", "python3", "jupyter", "notebook", "node", "npm", "npx",
+    "vite", "webpack", "next", "react", "vue", "angular", "svelte",
+    "uvicorn", "flask", "django", "fastapi", "gunicorn", "celery",
+    "streamlit", "gradio", "pytest", "jest", "cypress",
+    "docker", "podman", "containerd",
+    "code-server", "theia", "gitpod",
+]
+
+
+def _scan_processes() -> list[dict]:
+    """Scan for running processes that look agent-spawned."""
+    if not HAS_PSUTIL:
+        return [{"error": "psutil not available"}]
+    results = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline", "cpu_percent", "memory_percent", "create_time", "username"]):
+        try:
+            info = proc.info
+            cmdline = " ".join(info.get("cmdline") or [])
+            name = info.get("name", "")
+            combined = (name + " " + cmdline).lower()
+
+            # Check if process matches agent patterns
+            if not any(p in combined for p in _AGENT_PROCESS_PATTERNS):
+                continue
+
+            # Skip very short-lived or system processes
+            if info.get("create_time"):
+                age = time.time() - info["create_time"]
+                if age < 5:  # Skip processes younger than 5 seconds
+                    continue
+
+            results.append({
+                "pid": info.get("pid"),
+                "name": name,
+                "cmdline": cmdline[:300],
+                "cpu": round(info.get("cpu_percent", 0) or 0, 1),
+                "memory": round(info.get("memory_percent", 0) or 0, 1),
+                "age_seconds": int(time.time() - (info.get("create_time") or time.time())),
+                "username": info.get("username", "unknown"),
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return sorted(results, key=lambda x: x["pid"])
 
 
 def _aggregate() -> dict:
@@ -862,6 +915,61 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     border: 1px solid var(--color-ink-black);
   }
 
+  /* ── Process Scanner ─────────────────────────────────────────── */
+  .process-btn {
+    font-family: var(--font-text);
+    font-size: var(--text-body-sm);
+    font-weight: 400;
+    color: var(--color-ink-black);
+    background: var(--color-paper-white);
+    border: 1px solid var(--color-ink-black);
+    border-radius: 0;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  .process-btn:hover {
+    background: var(--color-ink-black);
+    color: var(--color-paper-white);
+  }
+  .process-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .process-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-caption);
+  }
+  .process-table th {
+    font-weight: 400;
+    color: var(--color-pencil-gray);
+    text-align: left;
+    padding: var(--spacing-5) var(--spacing-10);
+    border-bottom: 1px solid var(--color-ink-black);
+  }
+  .process-table td {
+    padding: var(--spacing-5) var(--spacing-10);
+    border-bottom: 1px dotted var(--color-pencil-gray);
+    vertical-align: top;
+  }
+  .process-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .process-table .pid {
+    font-variant-numeric: tabular-nums;
+    color: var(--color-pencil-gray);
+  }
+  .process-table .cmd {
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .process-table .age {
+    color: var(--color-pencil-gray);
+  }
+
   /* ── Responsive ──────────────────────────────────────────────── */
   @media (max-width: 768px) {
     body { padding: var(--spacing-20); }
@@ -890,6 +998,17 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 </header>
+
+<!-- ── Agent Processes ──────────────────────────────────────────── -->
+<section id="processes-section">
+  <div class="section-label">Agent Processes</div>
+  <button class="process-btn" id="refresh-processes" onclick="fetchProcesses()">Scan</button>
+  <div id="process-list" style="margin-top:var(--spacing-20)">
+    <div class="empty-state">Click Scan to find running agent processes</div>
+  </div>
+</section>
+
+<hr class="connector">
 
 <!-- ── Summary ──────────────────────────────────────────────────── -->
 <section id="summary-section">
@@ -1326,6 +1445,40 @@ function renderAgentChart(d) {
   document.getElementById('agent-chart').innerHTML = rows;
 }
 
+async function fetchProcesses() {
+  const btn = document.getElementById('refresh-processes');
+  const list = document.getElementById('process-list');
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  list.innerHTML = '<div class="empty-state">Scanning...</div>';
+  try {
+    const res = await fetch('/api/processes');
+    const processes = await res.json();
+    if (!processes.length) {
+      list.innerHTML = '<div class="empty-state">No agent processes found</div>';
+    } else {
+      const rows = processes.map(p =>
+        '<tr>' +
+        '<td class="pid">' + p.pid + '</td>' +
+        '<td>' + esc(p.name) + '</td>' +
+        '<td class="cmd" title="' + esc(p.cmdline) + '">' + esc(p.cmdline) + '</td>' +
+        '<td class="num">' + p.cpu + '%</td>' +
+        '<td class="num">' + p.memory + '%</td>' +
+        '<td class="age">' + Math.floor(p.age_seconds / 60) + 'm</td>' +
+        '</tr>'
+      ).join('');
+      list.innerHTML = '<table class="process-table"><thead><tr>' +
+        '<th>PID</th><th>Process</th><th>Command</th>' +
+        '<th class="num">CPU</th><th class="num">Mem</th><th>Age</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state">Error: ' + esc(e.message) + '</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Scan';
+}
+
 function renderAll(d) {
   DATA = d;
   document.getElementById('last-updated').textContent = d.last_updated;
@@ -1377,6 +1530,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._serve_stats()
         elif path == "/api/sessions":
             self._serve_sessions()
+        elif path == "/api/processes":
+            self._serve_processes()
         elif path == "/health":
             self._serve_health()
         else:
@@ -1405,6 +1560,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with _cache_lock:
             sessions = _cache.get("opencode", {}).get("sessions", [])
         data = json.dumps(sessions).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_processes(self):
+        processes = _scan_processes()
+        data = json.dumps(processes).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
