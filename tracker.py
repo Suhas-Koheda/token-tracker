@@ -717,6 +717,151 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     text-align: center;
   }
 
+  /* ── Charts & Heatmaps ────────────────────────────────────────── */
+  .chart-container {
+    margin-bottom: var(--spacing-50);
+  }
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--spacing-20);
+    height: 180px;
+    padding: var(--spacing-20) 0;
+    border-bottom: 1px solid var(--color-ink-black);
+  }
+  .bar-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-10);
+    height: 100%;
+    justify-content: flex-end;
+  }
+  .bar {
+    width: 100%;
+    max-width: 48px;
+    background: var(--color-ink-black);
+    transition: height 0.3s ease;
+  }
+  .bar-label {
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    color: var(--color-pencil-gray);
+    text-align: center;
+    margin-top: var(--spacing-10);
+  }
+  .bar-value {
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    color: var(--color-ink-black);
+    margin-bottom: var(--spacing-5);
+  }
+
+  /* Heatmap */
+  .heatmap-container {
+    overflow-x: auto;
+    padding: var(--spacing-20) 0;
+  }
+  .heatmap-grid {
+    display: grid;
+    grid-template-columns: 60px repeat(24, 1fr);
+    gap: 2px;
+    min-width: 800px;
+  }
+  .heatmap-label {
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    color: var(--color-pencil-gray);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: var(--spacing-10);
+  }
+  .heatmap-cell {
+    aspect-ratio: 1;
+    border: 1px solid var(--color-paper-white);
+  }
+  .heatmap-header {
+    display: contents;
+  }
+  .heatmap-header .heatmap-label {
+    justify-content: center;
+    padding-right: 0;
+    padding-bottom: var(--spacing-5);
+  }
+
+  /* Horizontal bars */
+  .hbar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-12);
+  }
+  .hbar-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-20);
+  }
+  .hbar-label {
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    color: var(--color-ink-black);
+    min-width: 80px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hbar-track {
+    flex: 1;
+    height: 20px;
+    background: var(--color-paper-white);
+    border-bottom: 1px dotted var(--color-pencil-gray);
+    position: relative;
+  }
+  .hbar-fill {
+    height: 100%;
+    background: var(--color-ink-black);
+    transition: width 0.3s ease;
+  }
+  .hbar-value {
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    color: var(--color-pencil-gray);
+    min-width: 60px;
+    text-align: right;
+  }
+
+  /* Stacked composition bar */
+  .stacked-bar {
+    display: flex;
+    height: 32px;
+    border: 1px solid var(--color-ink-black);
+    margin: var(--spacing-20) 0;
+  }
+  .stacked-segment {
+    height: 100%;
+    transition: width 0.3s ease;
+  }
+  .stacked-legend {
+    display: flex;
+    gap: var(--spacing-20);
+    flex-wrap: wrap;
+    margin-bottom: var(--spacing-20);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-5);
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    color: var(--color-ink-black);
+  }
+  .legend-swatch {
+    width: 12px;
+    height: 12px;
+    border: 1px solid var(--color-ink-black);
+  }
+
   /* ── Responsive ──────────────────────────────────────────────── */
   @media (max-width: 768px) {
     body { padding: var(--spacing-20); }
@@ -726,6 +871,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     .nav-arrows { gap: var(--spacing-20); }
     .data-table { font-size: var(--text-caption); }
     .data-table th, .data-table td { padding: var(--spacing-5) var(--spacing-10); }
+    .bar-chart { height: 120px; }
+    .heatmap-grid { grid-template-columns: 40px repeat(24, 1fr); min-width: 600px; }
   }
 </style>
 </head>
@@ -748,6 +895,51 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <section id="summary-section">
   <div class="section-label">Summary</div>
   <div class="summary-grid" id="summary-grid"></div>
+</section>
+
+<hr class="connector">
+
+<!-- ── Daily Bar Chart ──────────────────────────────────────────── -->
+<section id="daily-chart-section">
+  <div class="section-label">Daily Usage</div>
+  <div class="chart-container">
+    <div class="bar-chart" id="daily-chart"></div>
+  </div>
+</section>
+
+<hr class="connector">
+
+<!-- ── Token Composition ────────────────────────────────────────── -->
+<section id="composition-section">
+  <div class="section-label">Token Composition</div>
+  <div class="stacked-legend" id="composition-legend"></div>
+  <div class="stacked-bar" id="composition-bar"></div>
+</section>
+
+<hr class="connector">
+
+<!-- ── Activity Heatmap ─────────────────────────────────────────── -->
+<section id="heatmap-section">
+  <div class="section-label">Activity Heatmap</div>
+  <div class="heatmap-container">
+    <div class="heatmap-grid" id="heatmap-grid"></div>
+  </div>
+</section>
+
+<hr class="connector">
+
+<!-- ── Model Comparison ─────────────────────────────────────────── -->
+<section id="model-chart-section">
+  <div class="section-label">Model Comparison</div>
+  <div class="hbar-chart" id="model-chart"></div>
+</section>
+
+<hr class="connector">
+
+<!-- ── Agent Comparison ─────────────────────────────────────────── -->
+<section id="agent-chart-section">
+  <div class="section-label">Agent Comparison</div>
+  <div class="hbar-chart" id="agent-chart"></div>
 </section>
 
 <hr class="connector">
@@ -1005,12 +1197,146 @@ function renderOther(d) {
   document.getElementById('other-sources').innerHTML = parts.join('');
 }
 
+function renderDailyChart(d) {
+  const entries = Object.entries(d.opencode.by_day).sort((a,b) => a[0].localeCompare(b[0]));
+  if (!entries.length) {
+    document.getElementById('daily-chart').innerHTML = '<div class="empty-state">No data</div>';
+    return;
+  }
+  const maxVal = Math.max(...entries.map(([,v]) => v.input + v.output));
+  const bars = entries.map(([day, v]) => {
+    const total = v.input + v.output;
+    const height = maxVal > 0 ? (total / maxVal * 100) : 0;
+    return '<div class="bar-group">' +
+      '<span class="bar-value">' + fmt(total) + '</span>' +
+      '<div class="bar" style="height:' + height + '%"></div>' +
+      '<span class="bar-label">' + day.slice(5) + '</span>' +
+      '</div>';
+  }).join('');
+  document.getElementById('daily-chart').innerHTML = bars;
+}
+
+function renderComposition(d) {
+  const t = d.opencode.totals;
+  const total = t.input + t.output + t.reasoning + t.cache_read + t.cache_write;
+  if (!total) {
+    document.getElementById('composition-bar').innerHTML = '<div class="empty-state">No data</div>';
+    return;
+  }
+  const segments = [
+    { label: 'Input', value: t.input },
+    { label: 'Output', value: t.output },
+    { label: 'Reasoning', value: t.reasoning },
+    { label: 'Cache Read', value: t.cache_read },
+    { label: 'Cache Write', value: t.cache_write },
+  ];
+  const fills = ['#000000', '#333333', '#666666', '#999999', '#cccccc'];
+  const bar = segments.map((s, i) =>
+    '<div class="stacked-segment" style="width:' + (s.value / total * 100) + '%;background:' + fills[i] + '" title="' + s.label + ': ' + fmt(s.value) + '"></div>'
+  ).join('');
+  const legend = segments.map((s, i) =>
+    '<span class="legend-item"><span class="legend-swatch" style="background:' + fills[i] + '"></span>' + s.label + ' ' + fmt(s.value) + '</span>'
+  ).join('');
+  document.getElementById('composition-bar').innerHTML = bar;
+  document.getElementById('composition-legend').innerHTML = legend;
+}
+
+function renderHeatmap(d) {
+  const sessions = d.opencode.sessions;
+  if (!sessions.length) {
+    document.getElementById('heatmap-grid').innerHTML = '<div class="empty-state">No data</div>';
+    return;
+  }
+  // Build day x hour matrix
+  const days = [];
+  const dayMap = {};
+  sessions.forEach(s => {
+    const ts = s.time_created;
+    if (!ts) return;
+    const dt = new Date(ts);
+    const day = dt.toISOString().slice(0, 10);
+    const hour = dt.getUTCHours();
+    if (!dayMap[day]) {
+      dayMap[day] = new Array(24).fill(0);
+      days.push(day);
+    }
+    dayMap[day][hour] += s.tokens_input + s.tokens_output;
+  });
+  days.sort();
+  if (!days.length) {
+    document.getElementById('heatmap-grid').innerHTML = '<div class="empty-state">No data</div>';
+    return;
+  }
+  const maxVal = Math.max(...days.map(d => Math.max(...dayMap[d])));
+  // Header row with hours
+  let html = '<div class="heatmap-header"><span class="heatmap-label"></span>';
+  for (let h = 0; h < 24; h++) {
+    html += '<span class="heatmap-label">' + (h % 3 === 0 ? h : '') + '</span>';
+  }
+  html += '</div>';
+  // Data rows
+  days.forEach(day => {
+    html += '<span class="heatmap-label">' + day.slice(5) + '</span>';
+    for (let h = 0; h < 24; h++) {
+      const val = dayMap[day][h];
+      const intensity = maxVal > 0 ? val / maxVal : 0;
+      const gray = Math.round(255 - intensity * 255);
+      const bg = 'rgb(' + gray + ',' + gray + ',' + gray + ')';
+      html += '<div class="heatmap-cell" style="background:' + bg + '" title="' + day + ' ' + h + ':00 — ' + fmt(val) + ' tokens"></div>';
+    }
+  });
+  document.getElementById('heatmap-grid').innerHTML = html;
+}
+
+function renderModelChart(d) {
+  const entries = Object.entries(d.opencode.by_model).sort((a,b) => (b[1].input + b[1].output) - (a[1].input + a[1].output));
+  if (!entries.length) {
+    document.getElementById('model-chart').innerHTML = '<div class="empty-state">No data</div>';
+    return;
+  }
+  const maxVal = Math.max(...entries.map(([,v]) => v.input + v.output));
+  const rows = entries.map(([m, v]) => {
+    const total = v.input + v.output;
+    const pct = maxVal > 0 ? (total / maxVal * 100) : 0;
+    return '<div class="hbar-row">' +
+      '<span class="hbar-label" title="' + esc(m) + '">' + esc(m) + '</span>' +
+      '<div class="hbar-track"><div class="hbar-fill" style="width:' + pct + '%"></div></div>' +
+      '<span class="hbar-value">' + fmt(total) + '</span>' +
+      '</div>';
+  }).join('');
+  document.getElementById('model-chart').innerHTML = rows;
+}
+
+function renderAgentChart(d) {
+  const entries = Object.entries(d.opencode.by_agent).sort((a,b) => (b[1].input + b[1].output) - (a[1].input + a[1].output));
+  if (!entries.length) {
+    document.getElementById('agent-chart').innerHTML = '<div class="empty-state">No data</div>';
+    return;
+  }
+  const maxVal = Math.max(...entries.map(([,v]) => v.input + v.output));
+  const rows = entries.map(([a, v]) => {
+    const total = v.input + v.output;
+    const pct = maxVal > 0 ? (total / maxVal * 100) : 0;
+    return '<div class="hbar-row">' +
+      '<span class="hbar-label">' + esc(a) + '</span>' +
+      '<div class="hbar-track"><div class="hbar-fill" style="width:' + pct + '%"></div></div>' +
+      '<span class="hbar-value">' + fmt(total) + '</span>' +
+      '</div>';
+  }).join('');
+  document.getElementById('agent-chart').innerHTML = rows;
+}
+
 function renderAll(d) {
   DATA = d;
   document.getElementById('last-updated').textContent = d.last_updated;
   document.getElementById('footer-wd').textContent = 'Working directory: ' + d.working_directory;
   renderSummary(d);
   renderSources(d);
+  renderDailyChart(d);
+  renderComposition(d);
+  renderHeatmap(d);
+  renderModelChart(d);
+  renderAgentChart(d);
   renderSessions(d);
   renderModels(d);
   renderAgents(d);
