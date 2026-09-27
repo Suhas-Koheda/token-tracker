@@ -1006,6 +1006,21 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     opacity: 0.5;
     cursor: default;
   }
+  .kill-btn {
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    color: var(--color-ink-black);
+    background: var(--color-paper-white);
+    border: 1px solid var(--color-ink-black);
+    border-radius: 0;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  .kill-btn:hover {
+    background: var(--color-ink-black);
+    color: var(--color-paper-white);
+  }
   .process-table {
     width: 100%;
     border-collapse: collapse;
@@ -1536,11 +1551,12 @@ async function fetchProcesses() {
         '<td class="num">' + p.cpu + '%</td>' +
         '<td class="num">' + p.memory + '%</td>' +
         '<td class="age">' + p.age_display + '</td>' +
+        '<td><button class="kill-btn" onclick="killProcess(' + p.pid + ')">Kill</button></td>' +
         '</tr>'
       ).join('');
       list.innerHTML = '<table class="process-table"><thead><tr>' +
         '<th>PID</th><th>Process</th><th>Command</th>' +
-        '<th class="num">CPU</th><th class="num">Mem</th><th>Age</th>' +
+        '<th class="num">CPU</th><th class="num">Mem</th><th>Age</th><th></th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table>';
     }
   } catch (e) {
@@ -1548,6 +1564,22 @@ async function fetchProcesses() {
   }
   btn.disabled = false;
   btn.textContent = 'Scan';
+}
+
+async function killProcess(pid) {
+  if (!confirm('Kill process ' + pid + '?')) return;
+  try {
+    const res = await fetch('/api/kill/' + pid, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      // Refresh the list after a short delay
+      setTimeout(fetchProcesses, 500);
+    } else {
+      alert('Failed to kill: ' + (data.error || 'unknown error'));
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
 }
 
 function renderAll(d) {
@@ -1647,6 +1679,57 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path.startswith("/api/kill/"):
+            try:
+                pid = int(path.split("/")[-1])
+            except (ValueError, IndexError):
+                self._serve_400("invalid pid")
+                return
+            self._serve_kill(pid)
+        else:
+            self._serve_404()
+
+    def _serve_kill(self, pid: int):
+        if not HAS_PSUTIL:
+            self._serve_400("psutil not available")
+            return
+        try:
+            proc = psutil.Process(pid)
+            proc.terminate()
+            # Wait up to 3 seconds for graceful termination
+            try:
+                proc.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                proc.kill()  # Force kill if graceful terminate failed
+                proc.wait(timeout=2)
+            body = json.dumps({"status": "killed", "pid": pid}).encode()
+            self.send_response(200)
+        except psutil.NoSuchProcess:
+            body = json.dumps({"error": "process not found", "pid": pid}).encode()
+            self.send_response(404)
+        except psutil.AccessDenied:
+            body = json.dumps({"error": "access denied", "pid": pid}).encode()
+            self.send_response(403)
+        except Exception as e:
+            body = json.dumps({"error": str(e), "pid": pid}).encode()
+            self.send_response(500)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_400(self, msg: str):
+        body = json.dumps({"error": msg}).encode()
+        self.send_response(400)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_health(self):
         body = json.dumps({"status": "ok", "uptime": time.time()}).encode()
