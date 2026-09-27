@@ -282,13 +282,87 @@ def _load_codex_sessions() -> list[dict]:
 
 # Patterns that indicate agent-spawned processes
 _AGENT_PROCESS_PATTERNS = [
-    "python", "python3", "jupyter", "notebook", "node", "npm", "npx",
-    "vite", "webpack", "next", "react", "vue", "angular", "svelte",
+    "jupyter", "notebook", "vite", "webpack", "next", "react", "vue", "angular", "svelte",
     "uvicorn", "flask", "django", "fastapi", "gunicorn", "celery",
     "streamlit", "gradio", "pytest", "jest", "cypress",
-    "docker", "podman", "containerd",
     "code-server", "theia", "gitpod",
 ]
+
+import sys as _sys
+
+_PLATFORM = _sys.platform  # "linux", "darwin" (macOS), "win32" (Windows)
+
+# System path prefixes by platform
+if _PLATFORM == "win32":
+    _SYSTEM_PREFIXES = (
+        "c:\\windows\\", "c:\\program files\\", "c:\\program files (x86)\\",
+        "c:\\programdata\\", "c:\\users\\public\\",
+    )
+    _USER_DIR_MARKERS = ("c:\\users\\",)
+    _SYSTEM_NAMES = (
+        "svchost", "csrss", "wininit", "services", "lsass", "smss",
+        "winlogon", "taskhost", "dwm", "sihost", "ctfmon", "searchindexer",
+        "onedrive", "teams", "discord", "spotify", "chrome", "firefox",
+        "edge", "brave", "dockerd", "vmmem", "wsl",
+    )
+elif _PLATFORM == "darwin":
+    _SYSTEM_PREFIXES = (
+        "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/", "/opt/", "/usr/lib/",
+        "/usr/share/", "/usr/local/bin/", "/usr/local/sbin/", "/system/",
+        "/library/", "/private/",
+    )
+    _USER_DIR_MARKERS = ("/users/",)
+    _SYSTEM_NAMES = (
+        "launchd", "kernel_task", "windowserver", "bluetoothd", "coreaudiod",
+        "cfprefsd", "distnoted", "mds", "mdworker", "spotlight",
+        "docker", "com.docker", "virtualbox", "vmware",
+    )
+else:  # Linux
+    _SYSTEM_PREFIXES = (
+        "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/", "/opt/", "/usr/lib/",
+        "/usr/share/", "/usr/local/bin/", "/usr/local/sbin/",
+    )
+    _USER_DIR_MARKERS = ("/home/",)
+    _SYSTEM_NAMES = (
+        "firewalld", "tuned", "brave", "fusermount", "ibus",
+        "wsdd", "vicinae", "dockerd", "containerd", "cron",
+        "systemd", "networkmanager", "pulseaudio", "gnome-",
+    )
+
+
+def _is_agent_process(name: str, cmdline: str) -> bool:
+    """Heuristic: agent-spawned processes run dev servers, notebooks, or user scripts."""
+    combined = (name + " " + cmdline).lower()
+    cmdline_lower = cmdline.lower()
+    # Exclude system services by path prefix
+    if any(cmdline_lower.startswith(p) for p in _SYSTEM_PREFIXES):
+        return False
+    # Exclude system daemons by name
+    if any(name.lower().startswith(s) for s in _SYSTEM_NAMES):
+        return False
+    # Must match agent patterns
+    if not any(p in combined for p in _AGENT_PROCESS_PATTERNS):
+        return False
+    # Must be running from user dir or be a dev server
+    if any(m in cmdline_lower for m in _USER_DIR_MARKERS):
+        return True
+    if any(d in combined for d in ("dev", "serve", "notebook", "jupyter", "flask", "uvicorn", "streamlit")):
+        return True
+    return False
+
+
+def _format_age(seconds: int) -> str:
+    """Format age as human-readable string."""
+    if seconds < 60:
+        return str(seconds) + "s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return str(minutes) + "m"
+    hours = minutes // 60
+    if hours < 24:
+        return str(hours) + "h " + str(minutes % 60) + "m"
+    days = hours // 24
+    return str(days) + "d " + str(hours % 24) + "h"
 
 
 def _scan_processes() -> list[dict]:
@@ -301,17 +375,13 @@ def _scan_processes() -> list[dict]:
             info = proc.info
             cmdline = " ".join(info.get("cmdline") or [])
             name = info.get("name", "")
-            combined = (name + " " + cmdline).lower()
 
-            # Check if process matches agent patterns
-            if not any(p in combined for p in _AGENT_PROCESS_PATTERNS):
+            if not _is_agent_process(name, cmdline):
                 continue
 
-            # Skip very short-lived or system processes
-            if info.get("create_time"):
-                age = time.time() - info["create_time"]
-                if age < 5:  # Skip processes younger than 5 seconds
-                    continue
+            age = int(time.time() - (info.get("create_time") or time.time()))
+            if age < 5:
+                continue
 
             results.append({
                 "pid": info.get("pid"),
@@ -319,12 +389,13 @@ def _scan_processes() -> list[dict]:
                 "cmdline": cmdline[:300],
                 "cpu": round(info.get("cpu_percent", 0) or 0, 1),
                 "memory": round(info.get("memory_percent", 0) or 0, 1),
-                "age_seconds": int(time.time() - (info.get("create_time") or time.time())),
+                "age_seconds": age,
+                "age_display": _format_age(age),
                 "username": info.get("username", "unknown"),
             })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    return sorted(results, key=lambda x: x["pid"])
+    return sorted(results, key=lambda x: x["age_seconds"])
 
 
 def _aggregate() -> dict:
@@ -1464,7 +1535,7 @@ async function fetchProcesses() {
         '<td class="cmd" title="' + esc(p.cmdline) + '">' + esc(p.cmdline) + '</td>' +
         '<td class="num">' + p.cpu + '%</td>' +
         '<td class="num">' + p.memory + '%</td>' +
-        '<td class="age">' + Math.floor(p.age_seconds / 60) + 'm</td>' +
+        '<td class="age">' + p.age_display + '</td>' +
         '</tr>'
       ).join('');
       list.innerHTML = '<table class="process-table"><thead><tr>' +
